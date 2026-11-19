@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Họ tên** | Vuong Xuan Duong |
+| **Họ tên** | Vương Xuân Dương |
 | **MSSV** | 2A202603703 |
 | **Lớp** | K5 · L3A · Day 11 |
 | **Blue** | OpenRouter `liquid/lfm-3-1.7b:free` |
