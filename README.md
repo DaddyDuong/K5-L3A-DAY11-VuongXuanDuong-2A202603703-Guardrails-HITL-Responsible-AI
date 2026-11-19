@@ -1,5 +1,55 @@
 # Day 11 — Controlled Agent Security (2026)
 
+## 🧑‍🎓 Bài nộp học viên
+
+| | |
+|---|---|
+| **Họ tên** | Vuong Xuan Duong |
+| **MSSV** | 2A202603703 |
+| **Lớp** | K5 · L3A · Day 11 |
+| **Blue** | OpenRouter `liquid/lfm-3-1.7b:free` |
+| **Red / Red Advance** | `gpt-4o-mini` (route qua OpenRouter — xem ghi chú bên dưới) |
+
+### Kết quả (sinh bởi lệnh, xem `outputs/lab_report.md`)
+
+| Phần | Kết quả |
+|------|---------|
+| CP2–3 Blue | Safe bị chặn nhầm **0/6** · Attack bị chặn **9/9** · Rate limit **10 passed / 5 blocked** · Egress allowlist chính xác |
+| CP4 Red | Leak **5/5** prompt (Completion, Reformat, Creative, Confirmation, Multi-step) → chọn bonus **B1** |
+| CP4 Red Advance | Leak **0/5** — cả 5 bị NeMo input rail chặn |
+| Tự kiểm | `pytest tests/smoke tests/public` **49 passed** · `grade.py` technical_failure = **false** |
+
+### Cách chạy
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # Python 3.11/3.12
+pip install -r requirements.txt
+cp .env.example .env                                 # điền OPENROUTER_API_KEY + key Red
+python src/main.py --part 2                          # CP2 — guardrails (offline)
+python src/main.py --part 3                          # CP3 — outputs/results.json, audit_log.json, metrics.json
+python src/main.py --part 4                          # CP4 — outputs/*attack*.json
+pytest tests/smoke tests/public -q
+python scripts/grade.py --submission-dir . --out outputs/grade_report.json
+```
+
+### Ghi chú: Red route qua OpenRouter
+
+Gemini free tier (`gemini-3.5-flash`) bị 503 "high demand" rồi hết quota 20 request/ngày khi chạy CP4,
+và em không nạp được tiền cho OpenAI / Gemini. Vì vậy CP4 chạy **cùng model `gpt-4o-mini`** nhưng đi qua
+endpoint OpenAI-compatible của OpenRouter (nên `attack_results.json` ghi `llm_model = openai/gpt-4o-mini`):
+
+```bash
+export OPENAI_API_KEY=<OpenRouter key>
+RED_TEAM_PROVIDER=openai OPENAI_MODEL=openai/gpt-4o-mini \
+OPENAI_BASE_URL=https://openrouter.ai/api/v1 python src/main.py --part 4
+```
+
+Để NeMo self-check của Red Advance dùng cùng endpoint, `src/agents/red_advance_nemo.py::_model_entry`
+thêm `base_url` **chỉ khi** `OPENAI_BASE_URL` được đặt — không đặt biến này thì hành vi giữ nguyên như starter.
+Secret trong `data/protected/` không bị sửa.
+
+---
+
 > 👤 **Hình thức:** bài tập **cá nhân** (1 người / 1 MSSV).  
 > 🎯 **Mục tiêu:** đóng vai **Blue Team** để học cách xây Guardrails phòng thủ, rồi đóng vai **Red Team** để tấn công agent **Red** hoặc **Red Advance**.  
 > ✅ Làm theo **Checkpoint 1 → 5** trong [`CHECKPOINTS.md`](CHECKPOINTS.md) · nộp theo [`SUBMISSION.md`](SUBMISSION.md).

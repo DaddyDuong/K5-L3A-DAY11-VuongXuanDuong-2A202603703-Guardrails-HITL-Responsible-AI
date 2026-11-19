@@ -13,6 +13,34 @@ from google.adk import runners
 from google.adk.plugins import base_plugin
 
 from core.utils import chat_with_agent
+from core.config import DEMO_SECRETS
+
+
+# Thứ tự quan trọng: pattern chạy trước sẽ thay bằng [REDACTED] trước.
+# Secret cụ thể -> credential -> email -> ID -> phone.
+_SECRET_LITERALS = sorted({s for s in DEMO_SECRETS if s}, key=len, reverse=True)
+
+PII_PATTERNS = {
+    # Giá trị secret thật của lab (admin123, sk-vinbank-..., db.vinbank.internal)
+    # — bắt cả khi model nói trần, không kèm chữ "password".
+    **(
+        {"secret_value": "|".join(re.escape(s) for s in _SECRET_LITERALS)}
+        if _SECRET_LITERALS else {}
+    ),
+    # Host nội bộ: *.internal (kèm port nếu có)
+    "internal_host": r"\b[\w.-]+\.internal(?::\d+)?\b",
+    # API key kiểu sk-...
+    "api_key": r"\bsk-[A-Za-z0-9_-]{6,}",
+    # password=..., password: ..., password is ..., mật khẩu là ...
+    "password": r"\b(?:password|passwd|pwd|mật khẩu|mat khau)"
+                r"(?:\s*[:=]\s*|\s+(?:is|was|là)\s+)\S+",
+    # Email — trừ email hỗ trợ chính thức của VinBank (tránh redact nhầm)
+    "email": r"\b(?!support@vinbank\.example\b)[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}\b",
+    # CMND 9 số / CCCD 12 số
+    "national_id": r"\b\d{9}\b|\b\d{12}\b",
+    # SĐT VN: 0xxxxxxxxx (10–11 số) hoặc +84xxxxxxxxx
+    "phone": r"(?:\+84|\b0)\d{9,10}\b",
+}
 
 
 # ============================================================
@@ -38,16 +66,6 @@ def content_filter(response: str) -> dict:
     """
     issues = []
     redacted = response
-
-    # PII patterns to check
-    PII_PATTERNS = {
-        # TODO: Add regex patterns for:
-        # - VN phone number: r"0\d{9,10}"
-        # - Email: r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}"
-        # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
-        # - API key pattern: r"sk-[a-zA-Z0-9-]+"
-        # - Password pattern: r"password\s*[:=]\s*\S+"
-    }
 
     for name, pattern in PII_PATTERNS.items():
         matches = re.findall(pattern, response, re.IGNORECASE)
@@ -149,6 +167,7 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         self.blocked_count = 0
         self.redacted_count = 0
         self.total_count = 0
+        self.last_issues: list[str] = []
 
     def _extract_text(self, llm_response) -> str:
         """Extract text from LLM response."""
@@ -167,21 +186,37 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
     ):
         """Check LLM response before sending to user."""
         self.total_count += 1
+        self.last_issues = []
 
         response_text = self._extract_text(llm_response)
         if not response_text:
             return llm_response
 
-        # TODO: Implement logic:
-        # 1. Call content_filter(response_text)
-        #    - If issues found: replace llm_response.content with redacted version
-        #    - Increment self.redacted_count
-        # 2. If use_llm_judge: call llm_safety_check(response_text)
-        #    - If unsafe: replace llm_response.content with a safe message
-        #    - Increment self.blocked_count
-        # 3. Return llm_response (possibly modified)
+        # 1. Regex filter: che secret / PII
+        result = content_filter(response_text)
+        if not result["safe"]:
+            self.redacted_count += 1
+            self.last_issues = result["issues"]
+            response_text = result["redacted"]
+            llm_response.content = types.Content(
+                role="model",
+                parts=[types.Part.from_text(text=response_text)],
+            )
 
-        return llm_response  # TODO: modify if needed
+        # 2. (Optional) LLM-as-Judge
+        if self.use_llm_judge:
+            verdict = await llm_safety_check(response_text)
+            if not verdict["safe"]:
+                self.blocked_count += 1
+                llm_response.content = types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(
+                        text="I'm sorry, I can't share that information. "
+                             "Please contact VinBank support for help."
+                    )],
+                )
+
+        return llm_response
 
 
 # ============================================================
